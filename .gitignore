@@ -2,3 +2,6 @@
 Thumbs.db
 *.log
 .php-server.log
+
+# Per-deployment config (see .env.example) — never commit real values.
+.env

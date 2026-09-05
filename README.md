@@ -54,6 +54,49 @@ instance during development: static assets, `/api/health`, and the SPA
 fallback all returned the expected responses, and the app booted with zero
 console errors under it.
 
+### Serving PlanTrace from a subdirectory of an existing site
+
+PlanTrace's own HTML/CSS/JS never hard-code a path — every asset reference
+and module import is relative, and there isn't a single `fetch()` call in
+the app (persistence is IndexedDB-only) — so the *client* already works
+mounted anywhere. The one place a subdirectory mount needs to be told about
+itself is `public/api/index.php`'s path matching, since
+`$_SERVER['REQUEST_URI']` still carries the full, unmounted-relative path
+(e.g. `/plantrace/api/health`) even once Apache's `.htaccess` has routed the
+request to the right file.
+
+Copy `.env.example` to `.env` (same directory as this README) and set:
+
+```sh
+# Served at https://example.com/plantrace/ instead of the site's root:
+APP_BASE_PATH=/plantrace
+```
+
+Then mount it with an `Alias` into whatever site already owns that domain —
+you do **not** need a dedicated `<VirtualHost>`:
+
+```apache
+Alias /plantrace /path/to/plantrace/public
+<Directory /path/to/plantrace/public>
+    AllowOverride All
+    Require all granted
+</Directory>
+```
+
+`.env` also accepts `APP_ROOT_PATH` (absolute filesystem path to this
+project's root) for the rarer case where `public/` is reached through a
+symlink and PHP's own "parent of this script" path detection shouldn't be
+trusted — leave it blank otherwise. Both variables are read by
+`src/Support/BasePath.php`; a real environment variable of the same name
+(set by a hosting panel, systemd unit, etc.) always wins over `.env`.
+
+This was verified the same way as the root-mount case above, but with
+Apache's `DocumentRoot` pointed at an unrelated directory and PlanTrace
+reached only via `Alias /plantrace-sub` — static assets, `/api/health`, and
+the SPA fallback all resolved correctly under the subdirectory, and so does
+`php -S` locally once `.env` sets `APP_BASE_PATH` (handy for testing a
+subdirectory deployment without standing up Apache at all).
+
 ## What's here
 
 - **Prepare** — import JPG/PNG/WebP (PDF is accepted but explained-not-

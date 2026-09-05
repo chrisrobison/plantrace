@@ -204,6 +204,17 @@ Kernel/Request/Response trio Panic Backstage uses, so that boundary is real
 and occupies the right URL space (`/api/`) without inventing a database this
 phase doesn't need.
 
+`src/Support/Env.php` (a hand-rolled `.env` reader — no Composer dependency)
+and `src/Support/BasePath.php` let the whole app be mounted under any URL
+subdirectory of an existing site (`APP_BASE_PATH`) and, independently, live
+at any filesystem location (`APP_ROOT_PATH`) — see the README's "Serving
+PlanTrace from a subdirectory" section. Both `router.php` and
+`api/index.php` go through `BasePath` rather than reading
+`$_SERVER['REQUEST_URI']` directly, which is the only reason either of them
+needs to know about a mount path at all — nothing in the client-side app
+does, by construction (every asset reference and module import is relative,
+and the client never calls the API).
+
 ## What is NOT here on purpose
 
 - No bundler, transpiler, or npm/Composer runtime dependency.
