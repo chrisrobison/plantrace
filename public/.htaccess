@@ -1,0 +1,29 @@
+# Apache config for serving PlanTrace with DocumentRoot pointed at this
+# directory (see README.md "Deploying to Apache"). Not needed for
+# `php -S ... public/router.php` — that path uses router.php instead.
+#
+# PlanTrace has no client-side routes of its own (workflow steps are
+# in-memory state, not URLs), so there is very little to do here: real
+# static files are served as-is by Apache, and the only thing worth routing
+# is the /api/ shell.
+
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # /api/... that isn't a real file -> the API front controller.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^api/ api/index.php [L]
+
+  # Anything else that isn't a real file/directory falls back to the app
+  # shell, mirroring router.php's behavior for the built-in server.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . index.html [L]
+</IfModule>
+
+# Uploaded/exported files are all handled client-side (IndexedDB + download
+# blobs) — there is no server-side uploads directory to protect here.

@@ -25,6 +25,35 @@ Requires PHP 8.2+. Any evergreen desktop browser (Chrome/Edge/Firefox/Safari)
 works — the app leans on Pointer Events, `<dialog>`, `structuredClone`,
 `AbortController`, IndexedDB, and native Custom Elements/SVG.
 
+### Deploying to Apache
+
+Yes — point `DocumentRoot` at `public/` (mod_php or PHP-FPM) and you're done;
+`public/.htaccess` handles the rest, and `AllowOverride All` needs to be set
+for that directory so it's actually read:
+
+```apache
+<VirtualHost *:80>
+    DocumentRoot /path/to/plantrace/public
+    <Directory /path/to/plantrace/public>
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+```
+
+`router.php` is specifically for `php -S`'s router-script requirement and
+isn't used by Apache at all — Apache serves real files (`app.js`, `app.css`,
+icons, …) directly, same as the built-in server does. The only thing
+`.htaccess` adds is routing `/api/…` to `public/api/index.php` and falling
+back to `index.html` for any other non-file path — PlanTrace has no
+client-side routes of its own today (workflow steps are in-memory state,
+not URLs), so that fallback is mostly future-proofing rather than something
+the app currently relies on. `mod_rewrite` needs to be enabled
+(`a2enmod rewrite`). Verified against a real standalone Apache 2.4 + PHP 8.2
+instance during development: static assets, `/api/health`, and the SPA
+fallback all returned the expected responses, and the app booted with zero
+console errors under it.
+
 ## What's here
 
 - **Prepare** — import JPG/PNG/WebP (PDF is accepted but explained-not-
