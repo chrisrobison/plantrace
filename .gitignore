@@ -5,3 +5,8 @@ Thumbs.db
 
 # Per-deployment config (see .env.example) — never commit real values.
 .env
+
+# Uploaded source sheets (see storage/uploads/ + docs/ARCHITECTURE.md
+# "File uploads") — user content, never checked in.
+/storage/uploads/*
+!/storage/uploads/.gitkeep

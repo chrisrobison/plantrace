@@ -61,6 +61,21 @@ export class PtImportDialog extends PtElement {
     row.className = `pt-import-row ${ok ? '' : 'pt-import-row-warn'}`;
     row.innerHTML = `${iconMarkup(ok ? 'check' : 'warning', { size: 14 })}<span><strong>${esc(label)}</strong> — ${esc(message)}</span>`;
     container.prepend(row);
+    return row;
+  }
+
+  /** A placeholder row shown while a file uploads to the server (real network latency now, unlike the old IndexedDB-only path) — replaced in place once the upload settles. */
+  _logPending(container, label, message) {
+    const row = document.createElement('div');
+    row.className = 'pt-import-row';
+    row.innerHTML = `<span class="pt-spinner" style="width:14px;height:14px;flex:none;"></span><span><strong>${esc(label)}</strong> — ${esc(message)}</span>`;
+    container.prepend(row);
+    return row;
+  }
+
+  _finishRow(row, ok, label, message) {
+    row.className = `pt-import-row ${ok ? '' : 'pt-import-row-warn'}`;
+    row.innerHTML = `${iconMarkup(ok ? 'check' : 'warning', { size: 14 })}<span><strong>${esc(label)}</strong> — ${esc(message)}</span>`;
   }
 
   async _handleFiles(files, results, jsonOnly) {
@@ -86,14 +101,15 @@ export class PtImportDialog extends PtElement {
     if (!validation.ok) { this._logResult(results, file.name, false, validation.message); return; }
     const adapter = getSourceAdapter(file.type);
     if (!adapter.supported) { this._logResult(results, file.name, false, adapter.message); return; }
+    const row = this._logPending(results, file.name, 'Uploading…');
     try {
       const { blob, width, height } = await adapter.decode(file);
       const assetId = await projectRepository.saveAsset(blob, { filename: file.name, mimeType: file.type, width, height });
       const sheet = this._store.addSheet({ name: file.name.replace(/\.[^.]+$/, ''), originalFilename: file.name, assetId, naturalWidth: width, naturalHeight: height });
-      this._logResult(results, sheet.name, true, `Imported (${width}×${height}px).`);
+      this._finishRow(row, true, sheet.name, `Imported (${width}×${height}px).`);
       bus.publish('sheets.imported', { sheetId: sheet.id });
     } catch (err) {
-      this._logResult(results, file.name, false, err.message || 'Could not import this file.');
+      this._finishRow(row, false, file.name, err.message || 'Could not import this file.');
     }
   }
 }

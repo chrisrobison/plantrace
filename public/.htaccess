@@ -25,5 +25,15 @@ DirectoryIndex index.html
   RewriteRule . index.html [L]
 </IfModule>
 
-# Uploaded/exported files are all handled client-side (IndexedDB + download
-# blobs) — there is no server-side uploads directory to protect here.
+# Raise upload limits to match UploadStore::MAX_BYTES (src/Http/UploadStore.php).
+# mod_php only — for PHP-FPM, either edit the pool's php_admin_value settings
+# or rely on public/.user.ini (FPM reads .user.ini; mod_php does not).
+<IfModule mod_php.c>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 64M
+</IfModule>
+
+# Uploaded source sheets are stored under storage/ (a sibling of public/,
+# outside the web root — see src/Http/UploadStore.php) and are only ever
+# served back through the validated public/api/uploads.php endpoint, never
+# as a direct static path.

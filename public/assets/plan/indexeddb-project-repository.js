@@ -1,21 +1,22 @@
-// IndexedDB-backed persistence. This is the ONLY place that talks to
-// IndexedDB; every other module goes through the ProjectRepository-shaped
-// interface below. That boundary is deliberate — the brief calls for a
-// future PHP/MySQL repository to be able to replace this one without
-// touching a single UI component, so nothing outside this file may assume
-// "IndexedDB" is how persistence works.
+// Project-document persistence (IndexedDB) + source-image persistence
+// (the small PHP upload API, via remote-asset-store.js), unified behind one
+// ProjectRepository-shaped interface. That boundary is deliberate — the
+// brief calls for a future PHP/MySQL repository to be able to replace this
+// one without touching a single UI component, so nothing outside this file
+// may assume how either half is actually stored.
 //
-// Two object stores in one database:
-//  - "projects": id -> normalized project document (JSON-serializable)
-//  - "assets":   id -> { blob, filename, mimeType, width, height, size }
-//
-// Source images are kept here as Blobs (never as base64 strings), which is
-// also why they can't live in localStorage — the brief is explicit that
-// large source images must not end up there.
+// Project documents (sheets, geometry, layers, review state) are
+// JSON-serializable and stay in IndexedDB. Source images are real files
+// now, held by the server under storage/uploads/ (see
+// src/Http/UploadStore.php + docs/ARCHITECTURE.md "File uploads") rather
+// than as Blobs in IndexedDB — this is also why the brief's "don't put
+// large images in localStorage" concern doesn't apply here at all: they
+// never touch browser storage in the first place.
+import { uploadAsset, fetchAsset, deleteAsset } from './remote-asset-store.js';
+
 const DB_NAME = 'plantrace';
 const DB_VERSION = 1;
 const STORE_PROJECTS = 'projects';
-const STORE_ASSETS = 'assets';
 const LAST_PROJECT_KEY = 'plantrace:lastProjectId';
 
 /**
@@ -37,7 +38,6 @@ function openDb() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_PROJECTS)) db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' });
-      if (!db.objectStoreNames.contains(STORE_ASSETS)) db.createObjectStore(STORE_ASSETS, { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error('Failed to open IndexedDB'));
@@ -93,34 +93,49 @@ export class IndexedDBProjectRepository {
     await tx(db, STORE_PROJECTS, 'readwrite', (store) => store.delete(id));
   }
 
+  /** @returns {Promise<string>} the server-assigned asset id */
   async saveAsset(blob, meta = {}) {
-    const db = await this._db();
-    const id = meta.id || `asset_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    const record = { id, blob, filename: meta.filename || 'source', mimeType: meta.mimeType || blob.type, width: meta.width || 0, height: meta.height || 0, size: blob.size };
-    await tx(db, STORE_ASSETS, 'readwrite', (store) => store.put(record));
-    return id;
+    const result = await uploadAsset(blob, meta);
+    return result.id;
   }
 
   async loadAsset(assetId) {
     if (!assetId) return null;
-    const db = await this._db();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction(STORE_ASSETS, 'readonly').objectStore(STORE_ASSETS).get(assetId);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
+    try {
+      return await fetchAsset(assetId);
+    } catch (err) {
+      // Matches the old IndexedDB behavior of resolving to null for a
+      // missing record; callers already handle a null/failed asset by
+      // showing an "image unavailable" state rather than throwing.
+      if (String(err.message || '').includes('no longer exists')) return null;
+      throw err;
+    }
   }
 
   async removeAsset(assetId) {
-    const db = await this._db();
-    await tx(db, STORE_ASSETS, 'readwrite', (store) => store.delete(assetId));
+    if (!assetId) return;
+    await deleteAsset(assetId);
   }
 
-  /** Danger: wipes every project and every stored asset blob in this browser. Used by Settings → "Clear all local projects". */
+  /** Danger: wipes every project in this browser AND every uploaded source image those projects referenced on the server. Used by Settings → "Clear all local projects". */
   async clearAll() {
     const db = await this._db();
+    const docs = await new Promise((resolve, reject) => {
+      const req = db.transaction(STORE_PROJECTS, 'readonly').objectStore(STORE_PROJECTS).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    const assetIds = new Set();
+    for (const doc of docs) {
+      for (const sheet of doc.sheets || []) {
+        if (sheet.assetId) assetIds.add(sheet.assetId);
+        if (sheet.preparedAssetId) assetIds.add(sheet.preparedAssetId);
+      }
+    }
+    if (assetIds.size) {
+      await Promise.all([...assetIds].map((id) => deleteAsset(id)));
+    }
     await tx(db, STORE_PROJECTS, 'readwrite', (store) => store.clear());
-    await tx(db, STORE_ASSETS, 'readwrite', (store) => store.clear());
     this.setLastProjectId(null);
   }
 

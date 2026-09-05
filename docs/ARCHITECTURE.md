@@ -43,7 +43,10 @@ was carried over — only the architectural patterns.
 public/
   index.html            single HTML shell — everything else is JS/CSS
   router.php            php -S front controller (static files, /api/, SPA fallback)
-  api/index.php          minimal API shell (see "PHP" below)
+  .htaccess              Apache equivalent of router.php's routing
+  api/
+    index.php             tiny API front controller — see "PHP" below
+    uploads.php            upload/fetch/delete for source images — see "File uploads" below
   assets/
     app.css              design tokens + every component's styles (light DOM, shared sheet)
     core.js              $, esc, PtElement, message bus, toast stack, dialog helpers
@@ -51,6 +54,11 @@ public/
     icons/icons.js        dependency-free inline-SVG icon set
     plan/                 pure logic — no DOM, no customElements — see below
     components/            pt-* Web Components — see below
+src/
+  Http/JsonResponse.php, UploadStore.php    small PHP-side helpers, see "PHP" / "File uploads"
+  Support/Env.php, BasePath.php              .env + subdirectory-mount support
+storage/
+  uploads/               uploaded source images live here — outside the web root
 ```
 
 ### `plan/` — pure logic modules
@@ -75,7 +83,8 @@ provable and boring.
 | `source-adapters.js` | File → pixels adapter boundary (raster supported, PDF stubbed) |
 | `raster-prep.js` | Bakes rotation/crop into a derived raster via `<canvas>` |
 | `svg-export.js` / `dxf-export.js` / `json-export.js` | The three export formats |
-| `indexeddb-project-repository.js` | The only file that touches IndexedDB |
+| `indexeddb-project-repository.js` | The only file that touches IndexedDB; delegates asset methods to `remote-asset-store.js` |
+| `remote-asset-store.js` | Talks to `public/api/uploads.php` — upload/fetch/delete a source image |
 | `plan-document-store.js` | `PlanDocumentStore` — see next section |
 
 ### `components/` — Web Components
@@ -180,19 +189,54 @@ here means the recipe (`sheet.prep`) is always kept, not merely that a
 ## Persistence
 
 `plan/indexeddb-project-repository.js` is the only file that calls
-`indexedDB.*`. It exposes `list/load/save/remove` for project documents and
-`saveAsset/loadAsset/removeAsset` for source-image blobs (kept as `Blob`s,
-never base64 — large images must not end up in `localStorage` per the
-brief). Everything else — components, the store — talks to this repository
-through that same small interface, which is the seed of the "future
-PHP/MySQL repository" the brief asks for: swap this file's internals for
-`fetch()` calls against `public/api/`, and no UI component changes.
+`indexedDB.*`. It exposes `list/load/save/remove` for project documents
+(sheets, geometry, layers, review state — plain JSON, stays in IndexedDB)
+and `saveAsset/loadAsset/removeAsset` for source images, which it delegates
+to `remote-asset-store.js` (real server-side file storage now — see "File
+uploads" below; `loadAsset()` still resolves a `Blob` either way, so no
+caller needed to change). Everything else — components, the store — talks
+to this repository through that same small interface, which is the seed of
+the "future PHP/MySQL repository" the brief asks for: swap the document
+methods' internals for `fetch()` calls against `public/api/` the same way
+the asset methods already were, and no UI component changes.
 
 `pt-app-shell.js` wires autosave: a debounced (800ms) listener on the
 store's `change` event calls `repository.save()`, flips `store.saveState`
 through `saving → saved`/`error`, and the header's save indicator reflects
 that. Portable JSON export/import (`plan/json-export.js`) is the explicit
 backup path, independent of IndexedDB.
+
+## File uploads
+
+Source images (the actual JPG/PNG/WebP/PDF bytes) are the one piece of
+state that lives on the server rather than in the browser — see
+`public/api/uploads.php` + `src/Http/UploadStore.php`. No database: one
+file plus a small JSON metadata sidecar per upload, under `storage/uploads/`
+(a sibling of `public/`, outside the web root, so an upload can only ever be
+reached through the validated endpoint — never as a direct static path).
+
+```
+POST   /api/uploads        multipart "file" (+ optional width/height) -> {id, url, filename, mimeType, size, width, height}
+GET    /api/uploads/{id}   the raw bytes back, with metadata in response headers
+DELETE /api/uploads/{id}   removes it
+```
+
+`plan/remote-asset-store.js` is the only module that calls this endpoint;
+`plan/indexeddb-project-repository.js`'s `saveAsset()`/`loadAsset()`/
+`removeAsset()` delegate straight to it. This is the same
+`ProjectRepository`-shaped boundary described above — no UI component
+changed when asset storage moved from an IndexedDB object store to the
+server, because every call site already only knew the interface, never the
+backing store. `saveAsset()` still returns an opaque string id and
+`loadAsset()` still resolves `{blob, filename, mimeType, width, height}`;
+where that Blob's bytes actually come from is this module's problem alone.
+
+The API's base URL is computed with `new URL('../../api/', import.meta.url)`
+rather than a hard-coded absolute path — the browser resolves that relative
+to the module's own URL, so it keeps working under a subdirectory mount
+(see the README's "Serving PlanTrace from a subdirectory") with no
+awareness of `APP_BASE_PATH` needed on the client side at all. The PHP side
+still needs it, for the same reason described in "PHP" below.
 
 ## PHP
 

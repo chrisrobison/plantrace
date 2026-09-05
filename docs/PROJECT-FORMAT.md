@@ -36,8 +36,8 @@ reinterpret it.
   "name": "First Floor",
   "order": 0,
   "originalFilename": "first-floor-scan.jpg",   // or null for a blank/synthetic sheet
-  "assetId": "asset_...",                        // IndexedDB asset id of the ORIGINAL upload, or null
-  "preparedAssetId": null,                       // baked rotation+crop derivative; null = "use assetId as-is"
+  "assetId": "up_...",                           // id of the ORIGINAL upload, fetchable at /api/uploads/{id} — see docs/ARCHITECTURE.md "File uploads" — or null
+  "preparedAssetId": null,                       // baked rotation+crop derivative, same /api/uploads/{id} shape; null = "use assetId as-is"
   "naturalWidth": 1700, "naturalHeight": 1300,   // pixel dimensions of the CURRENT working image (post rotation/crop)
   "prep": {
     "rotation": 0,          // 0 | 90 | 180 | 270
